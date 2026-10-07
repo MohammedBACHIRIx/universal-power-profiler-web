@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Power Profiler Web — Universal Dual Wattmeter Cloud IDE</title>
+  <!-- Chart.js for silky smooth 60fps streaming waveforms -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- Tailwind CSS via CDN for clean dark-mode UI -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              bg: '#090d16',
+              surface: '#111726',
+              subtle: '#161f33',
+              border: '#1e293b',
+              accent: '#0284c7',
+              cyan: '#38bdf8',
+              emerald: '#34d399',
+              amber: '#fbbf24',
+              rose: '#f43f5e'
+            }
+          },
+          fontFamily: {
+            mono: ['Consolas', 'Cascadia Code', 'SFMono-Regular', 'Menlo', 'monospace'],
+            sans: ['Segoe UI Variable Text', 'Segoe UI', 'Inter', '-apple-system', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom scrollbar for terminal streams */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #090d16; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    .metric-value { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body class="bg-[#090d16] text-slate-100 font-sans min-h-screen flex flex-col select-none antialiased">
+
+  <!-- ================= TOP NAV HEADER (Arduino Cloud IDE Style) ================= -->
+  <header class="bg-[#111726] border-b border-slate-800 px-5 py-2.5 flex items-center justify-between shadow-md">
+    <div class="flex items-center space-x-4">
+      <!-- Logo / Status -->
+      <div class="flex items-center space-x-2">
+        <div class="w-3.5 h-3.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_rgba(56,189,248,0.7)]"></div>
+        <span class="font-bold tracking-wider text-sm text-white">POWER PROFILER <span class="text-cyan-400 font-normal">WEB</span></span>
+      </div>
+      <span class="text-[11px] font-semibold bg-slate-800/80 text-slate-300 border border-slate-700/60 px-2 py-0.5 rounded uppercase tracking-wider">
+        Universal Web IDE & Bench
+      </span>
+      <div id="ws-badge" class="flex items-center space-x-1.5 text-xs text-rose-400 bg-rose-950/40 border border-rose-800/50 px-2.5 py-0.5 rounded-full">
+        <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+        <span id="ws-status">Connecting Backend...</span>
+      </div>
+    </div>
+
+    <!-- Web Serial Browser Direct Access & Global Tool Actions -->
+    <div class="flex items-center space-x-3">
+      <button id="btn-web-serial" onclick="connectDirectWebSerial()" 
+              class="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 font-medium px-3 py-1.5 rounded transition">
+        <span>🔌</span>
+        <span>Browser Web Serial API</span>
+      </button>
+
+      <button id="btn-export-csv" onclick="exportSnapshotCsv()" 
+              class="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 font-medium px-3 py-1.5 rounded transition">
+        <span>💾</span>
+        <span>Snapshot CSV</span>
+      </button>
+
+      <button id="btn-toggle-log" onclick="toggleCsvRecording()" 
+              class="flex items-center space-x-1.5 bg-sky-600 hover:bg-sky-500 text-xs text-white font-semibold px-3.5 py-1.5 rounded shadow transition">
+        <span id="log-icon">▶</span>
+        <span id="log-label">Start CSV Recording</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= KPI HERO STRIP (EFFICIENCY & POWER DELTA) ================= -->
+  <section class="bg-[#161f33] border-b border-slate-800/80 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center space-x-8">
+      <!-- Efficiency -->
+      <div>
+        <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Conversion Efficiency (η)</div>
+        <div class="flex items-baseline space-x-2 mt-0.5">
+          <span id="kpi-eff" class="font-mono text-3xl font-extrabold text-emerald-400 metric-value">--- %</span>
+          <span class="text-xs text-slate-400 font-medium">(P2 / P1)</span>
+        </div>
+      </div>
+
+      <div class="h-10 w-[1px] bg-slate-800"></div>
+
+      <!-- Power Loss -->
+      <div>
+        <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Power Delta / Loss (P1 - P2)</div>
+        <div class="flex items-baseline space-x-2 mt-0.5">
+          <span id="kpi-loss" class="font-mono text-3xl font-extrabold text-amber-400 metric-value">--- W</span>
+          <span class="text-xs text-slate-400 font-medium">(Active Dissipation)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Bench Sub-text -->
+    <div class="text-right">
+      <div id="kpi-bench-status" class="text-xs text-slate-300 font-medium">Ready for synchronized dual measurement</div>
+      <div class="text-[11px] text-slate-500 font-mono mt-0.5">Dual-meter sampling rate: ~470 ms/frame</div>
+    </div>
+  </section>
+
+  <!-- ================= MAIN DUAL BENCH WORKSPACE ================= -->
+  <main class="flex-1 p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+    <!-- ================= CHANNEL 1 (INPUT METER) ================= -->
+    <div class="bg-[#111726] border border-slate-800 rounded-lg flex flex-col overflow-hidden shadow-lg">
+      <!-- Header -->
+      <div class="bg-[#161f33]/70 px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <span id="ch1-dot" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+          <h2 class="font-bold text-sm text-slate-200">Channel 1 — Input Meter</h2>
+        </div>
+        <span id="ch1-status" class="text-[11px] font-bold tracking-wider text-slate-400 uppercase">Disconnected</span>
+      </div>
+
+      <!-- Connection Controls Bar -->
+      <div class="p-3 bg-[#111726] border-b border-slate-800 flex flex-wrap items-center gap-2">
+        <select id="ch1-mode" onchange="switchMode(1)" 
+                class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1.5 focus:outline-none focus:border-cyan-500">
+          <option value="SERIAL">SERIAL (COM)</option>
+          <option value="TCP">ETHERNET (TCP / WIZ750SR)</option>
+        </select>
+
+        <!-- Serial target -->
+        <div id="ch1-serial-box" class="flex items-center space-x-1.5 flex-1">
+          <select id="ch1-port" 
+                  class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1.5 flex-1 focus:outline-none focus:border-cyan-500">
+            <option value="SIMULATOR-P1">SIMULATOR-P1 (Virtual Bench)</option>
+          </select>
+          <button onclick="refreshPorts()" title="Refresh COM Ports" 
+                  class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs px-2.5 py-1.5 rounded">↻</button>
+        </div>
+
+        <!-- TCP target -->
+        <div id="ch1-tcp-box" class="hidden flex items-center space-x-1.5 flex-1">
+          <input id="ch1-tcp" type="text" value="192.168.11.2:5000" placeholder="IP:Port (e.g. 192.168.11.2:5000)" 
+                 class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1.5 flex-1 font-mono focus:outline-none focus:border-cyan-500">
+        </div>
+
+        <button id="ch1-btn-connect" onclick="toggleConnect(1)" 
+                class="bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs px-4 py-1.5 rounded shadow transition">
+          Connect
+        </button>
+      </div>
+
+      <!-- Live Numerical Readouts -->
+      <div class="grid grid-cols-3 gap-2 p-3 bg-[#0d1320] border-b border-slate-800 text-center">
+        <div class="bg-[#111726] border border-slate-800/80 p-2.5 rounded">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Voltage</div>
+          <div id="ch1-v" class="font-mono text-xl font-bold text-cyan-400 mt-1 metric-value">--- V</div>
+        </div>
+        <div class="bg-[#111726] border border-slate-800/80 p-2.5 rounded">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Current</div>
+          <div id="ch1-i" class="font-mono text-xl font-bold text-emerald-400 mt-1 metric-value">--- A</div>
+        </div>
+        <div class="bg-[#111726] border border-slate-800/80 p-2.5 rounded">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Power</div>
+          <div id="ch1-w" class="font-mono text-xl font-bold text-amber-400 mt-1 metric-value">--- W</div>
+        </div>
+      </div>
+
+      <!-- ISW8001 Instrument Mode Toolbar -->
+      <div class="px-3 py-2 bg-[#111726] border-b border-slate-800 flex items-center justify-between text-xs">
+        <div class="flex items-center space-x-1">
+          <span class="text-[11px] font-bold text-slate-400 mr-1.5">ISW:</span>
+          <button onclick="sendCommand(1, 'WATT')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] border border-slate-700">WATT</button>
+          <button onclick="sendCommand(1, 'VAR')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] border border-slate-700">VAR</button>
+          <button onclick="sendCommand(1, 'VOLT')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] border border-slate-700">VOLT</button>
+          <button onclick="sendCommand(1, 'AMP')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] border border-slate-700">AMP</button>
+          <button onclick="sendCommand(1, 'PWF')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] border border-slate-700">PWF</button>
+        </div>
+        <button onclick="sendCommand(1, 'AUTORANGE')" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded text-[11px] border border-slate-700">AutoRange</button>
+      </div>
+
+      <!-- Real-time Chart Waveform -->
+      <div class="p-3 flex-1 flex flex-col min-h-[220px]">
+        <div class="text-[11px] font-bold text-slate-400 mb-1">Live Power Trend (W)</div>
+        <div class="flex-1 relative w-full h-full min-h-[180px]">
+          <canvas id="chart1"></canvas>
+        </div>
+      </div>
+
+      <!-- Terminal / Serial Stream -->
+      <div class="border-t border-slate-800 bg-[#090d16] p-2.5">
+        <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Raw ASCII Stream</div>
+        <pre id="ch1-log" class="font-mono text-[11px] text-slate-400 h-16 overflow-y-auto leading-relaxed select-text"></pre>
+      </div>
+    </div>
+
+    <!-- ================= CHANNEL 2 (OUTPUT METER) ================= -->
+    <div class="bg-[#111726] border border-slate-800 rounded-lg flex flex-col overflow-hidden shadow-lg">
+      <!-- Header -->
+      <div class="bg-[#161f33]/70 px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <span id="ch2-dot" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+          <h2 class="font-bold text-sm text-slate-200">Channel 2 — Output Meter</h2>
+        </div>
+        <span id="ch2-status" class="text-[11px] font-bold tracking-wider text-slate-400 uppercase">Disconnected</span>
+      </div>
+
+      <!-- Connection Controls Bar -->
+      <div class="p-3 bg-[#111726] border-b border-slate-800 flex flex-wrap items-center gap-2">
+        <select id="ch2-mode" onchange="switchMode(2)" 
+                class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1.5 focus:outline-none focus:border-cyan-500">
+          <option value="TCP">ETHERNET (TCP / WIZ750SR)</option>
+          <option value="SERIAL">SERIAL (COM)</option>
+        </select>
+
+        <!-- TCP target -->
+        <div id="ch2-tcp-box" class="flex items-center space-x-1.5 flex-1">
+          <input id="ch2-tcp" type="text" value="192.168.11.3:5000" placeholder="IP:Port (e.g. 192.168.11.3:5000)" 
+                 class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1.5 flex-1 font-mono focus:outline-none focus:border-cyan-500">
+        </div>
+
+        <!-- Serial target -->
+        <div id="ch2-serial-box" class="hidden flex items-center space-x-1.5 flex-1">
+          <select id="ch2-port" 
+                  class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1.5 flex-1 focus:outline-none focus:border-cyan-500">
+            <option value="SIMULATOR-P2">SIMULATOR-P2 (Virtual Bench)</option>
+          </select>
+          <button onclick="refreshPorts()" title="Refresh COM Ports" 
+                  class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs px-2.5 py-1.5 rounded">↻</button>
+        </div>
+
+        <button id="ch2-btn-connect" onclick="toggleConnect(2)" 
+                class="bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs px-4 py-1.5 rounded shadow transition">
+          Connect
+        </button>
+      </div>
+
+      <!-- Live Numerical Readouts -->
+      <div class="grid grid-cols-3 gap-2 p-3 bg-[#0d1320] border-b border-slate-800 text-center">
+        <div class="bg-[#111726] border border-slate-800/80 p-2.5 rounded">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Voltage</div>
+          <div id="ch2-v" class="font-mono text-xl font-bold text-cyan-400 mt-1 metric-value">--- V</div>
+        </div>
+        <div class="bg-[#111726] border border-slate-800/80 p-2.5 rounded">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Current</div>
+          <div id="ch2-i" class="font-mono text-xl font-bold text-emerald-400 mt-1 metric-value">--- A</div>
+        </div>
+        <div class="bg-[#111726] border border-slate-800/80 p-2.5 rounded">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Power</div>
+          <div id="ch2-w" class="font-mono text-xl font-bold text-amber-400 mt-1 metric-value">--- W</div>
+        </div>
+      </div>
+
+      <!-- ISW8001 Instrument Mode Toolbar -->
+      <div class="px-3 py-2 bg-[#111726] border-b border-slate-800 flex items-center justify-between text-xs">
+        <div class="flex items-center space-x-1">
+          <span class="text-[11px] font-bold text-slate-400 mr-1.5">ISW:</span>
+          <button onclick="sendCommand(2, 'WATT')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] border border-slate-700">WATT</button>
+          <button onclick="sendCommand(2, 'VAR')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] border border-slate-700">VAR</button>
+          <button onclick="sendCommand(2, 'VOLT')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] border border-slate-700">VOLT</button>
+          <button onclick="sendCommand(2, 'AMP')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] border border-slate-700">AMP</button>
+          <button onclick="sendCommand(2, 'PWF')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[11px] border border-slate-700">PWF</button>
+        </div>
+        <button onclick="sendCommand(2, 'AUTORANGE')" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded text-[11px] border border-slate-700">AutoRange</button>
+      </div>
+
+      <!-- Real-time Chart Waveform -->
+      <div class="p-3 flex-1 flex flex-col min-h-[220px]">
+        <div class="text-[11px] font-bold text-slate-400 mb-1">Live Power Trend (W)</div>
+        <div class="flex-1 relative w-full h-full min-h-[180px]">
+          <canvas id="chart2"></canvas>
+        </div>
+      </div>
+
+      <!-- Terminal / Serial Stream -->
+      <div class="border-t border-slate-800 bg-[#090d16] p-2.5">
+        <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Raw ASCII Stream</div>
+        <pre id="ch2-log" class="font-mono text-[11px] text-slate-400 h-16 overflow-y-auto leading-relaxed select-text"></pre>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ================= STATUS & CSV RECORDING FOOTER ================= -->
+  <footer class="bg-[#111726] border-t border-slate-800 px-5 py-2 flex items-center justify-between text-xs text-slate-400">
+    <div class="flex items-center space-x-4">
+      <div class="flex items-center space-x-1.5">
+        <span class="text-[11px] font-bold text-slate-500 uppercase">CSV Logger:</span>
+        <span id="footer-log-status" class="text-slate-300">Idle (Stopped)</span>
+      </div>
+      <div class="h-3 w-[1px] bg-slate-700"></div>
+      <div class="flex items-center space-x-1.5">
+        <span class="text-[11px] font-bold text-slate-500 uppercase">Buffer:</span>
+        <span id="footer-log-count" class="font-mono text-emerald-400">0 records</span>
+      </div>
+    </div>
+    <div class="text-[11px] text-slate-500 font-mono">
+      Web Serial &bull; WebSocket Bridge &bull; ISW8001 Protocol
+    </div>
+  </footer>
+
+  <!-- ================= CLIENT APPLICATION LOGIC ================= -->
+  <script>
+    // State management
+    const state = {
+      ws: null,
+      recording: false,
+      records: [],
+      ch1: { connected: false, v: 0, i: 0, p: 0, pf: 0, var: 0, history: [] },
+      ch2: { connected: false, v: 0, i: 0, p: 0, pf: 0, var: 0, history: [] }
+    };
+
+    // Chart.js Setup
+    const chartConfig = (accentColor) => ({
+      type: 'line',
+      data: {
+        labels: Array(50).fill(''),
+        datasets: [{
+          data: Array(50).fill(null),
+          borderColor: accentColor,
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.25,
+          fill: true,
+          backgroundColor: accentColor + '15'
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: false },
+          y: {
+            grid: { color: '#1e293b' },
+            ticks: { color: '#64748b', font: { family: 'Consolas', size: 10 } }
+          }
+        }
+      }
+    });
+
+    const chart1 = new Chart(document.getElementById('chart1').getContext('2d'), chartConfig('#38bdf8'));
+    const chart2 = new Chart(document.getElementById('chart2').getContext('2d'), chartConfig('#fbbf24'));
+
+    function updateChart(chart, val) {
+      const data = chart.data.datasets[0].data;
+      data.shift();
+      data.push(val);
+      chart.update('none');
+    }
+
+    // Connect WebSocket to Python Local Bridge
+    function initWebSocket() {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${proto}//${window.location.hostname}:8765`;
+      
+      const badge = document.getElementById('ws-badge');
+      const badgeText = document.getElementById('ws-status');
+
+      state.ws = new WebSocket(wsUrl);
+
+      state.ws.onopen = () => {
+        badge.className = "flex items-center space-x-1.5 text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-2.5 py-0.5 rounded-full";
+        badgeText.textContent = "Backend Connected";
+        refreshPorts();
+      };
+
+      state.ws.onclose = () => {
+        badge.className = "flex items-center space-x-1.5 text-xs text-rose-400 bg-rose-950/40 border border-rose-800/50 px-2.5 py-0.5 rounded-full";
+        badgeText.textContent = "Disconnected (Retrying...)";
+        setTimeout(initWebSocket, 2000);
+      };
+
+      state.ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          handleBackendMessage(msg);
+        } catch (e) {
+          console.error("WS Parse error:", e);
+        }
+      };
+    }
+
+    function handleBackendMessage(msg) {
+      if (msg.type === 'ports') {
+        populatePorts(1, msg.ports);
+        populatePorts(2, msg.ports);
+      } else if (msg.type === 'status') {
+        updateChannelStatus(msg.port_id, msg.connected, msg.target);
+      } else if (msg.type === 'data') {
+        processChannelData(msg.port_id, msg.data);
+      }
+    }
+
+    function populatePorts(pid, ports) {
+      const sel = document.getElementById(`ch${pid}-port`);
+      const current = sel.value;
+      sel.innerHTML = '';
+      ports.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = p;
+        sel.appendChild(opt);
+      });
+      if (ports.includes(current)) sel.value = current;
+      else if (ports.length > 0) sel.value = ports[pid === 1 ? ports.length - 2 : ports.length - 1] || ports[0];
+    }
+
+    function switchMode(pid) {
+      const mode = document.getElementById(`ch${pid}-mode`).value;
+      const serialBox = document.getElementById(`ch${pid}-serial-box`);
+      const tcpBox = document.getElementById(`ch${pid}-tcp-box`);
+      if (mode === 'TCP') {
+        serialBox.classList.add('hidden');
+        tcpBox.classList.remove('hidden');
+      } else {
+        tcpBox.classList.add('hidden');
+        serialBox.classList.remove('hidden');
+      }
+    }
+
+    function toggleConnect(pid) {
+      const isConnected = state[`ch${pid}`].connected;
+      const btn = document.getElementById(`ch${pid}-btn-connect`);
+      const mode = document.getElementById(`ch${pid}-mode`).value;
+      const target = mode === 'TCP' ? document.getElementById(`ch${pid}-tcp`).value : document.getElementById(`ch${pid}-port`).value;
+
+      if (!isConnected) {
+        state.ws.send(JSON.stringify({
+          action: 'connect',
+          port_id: pid,
+          conn_type: mode,
+          target: target
+        }));
+      } else {
+        state.ws.send(JSON.stringify({
+          action: 'disconnect',
+          port_id: pid
+        }));
+      }
+    }
+
+    function updateChannelStatus(pid, connected, target) {
+      state[`ch${pid}`].connected = connected;
+      const btn = document.getElementById(`ch${pid}-btn-connect`);
+      const dot = document.getElementById(`ch${pid}-dot`);
+      const status = document.getElementById(`ch${pid}-status`);
+
+      if (connected) {
+        btn.textContent = 'Disconnect';
+        btn.className = 'bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs px-4 py-1.5 rounded shadow transition';
+        dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]';
+        status.textContent = `CONNECTED (${target})`;
+        status.className = 'text-[11px] font-bold tracking-wider text-emerald-400 uppercase';
+      } else {
+        btn.textContent = 'Connect';
+        btn.className = 'bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs px-4 py-1.5 rounded shadow transition';
+        dot.className = 'w-2.5 h-2.5 rounded-full bg-slate-600';
+        status.textContent = 'DISCONNECTED';
+        status.className = 'text-[11px] font-bold tracking-wider text-slate-400 uppercase';
+        document.getElementById(`ch${pid}-v`).textContent = '--- V';
+        document.getElementById(`ch${pid}-i`).textContent = '--- A';
+        document.getElementById(`ch${pid}-w`).textContent = '--- W';
+        state[`ch${pid}`].p = 0;
+        updateEfficiency();
+      }
+    }
+
+    function sendCommand(pid, cmd) {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+      state.ws.send(JSON.stringify({
+        action: 'command',
+        port_id: pid,
+        cmd: cmd
+      }));
+    }
+
+    function refreshPorts() {
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ action: 'refresh_ports' }));
+      }
+    }
+
+    function processChannelData(pid, raw) {
+      const logPre = document.getElementById(`ch${pid}-log`);
+      logPre.textContent += raw + "\n";
+      logPre.scrollTop = logPre.scrollHeight;
+
+      // Keep stream buffer bounded
+      const lines = logPre.textContent.split('\n');
+      if (lines.length > 50) {
+        logPre.textContent = lines.slice(-40).join('\n');
+      }
+
+      // Regex parser for ISW8001
+      const vMatch = raw.match(/U\d=([+-]?[\d\.]+E[+-]?\d+)/);
+      const iMatch = raw.match(/I\d=([+-]?[\d\.]+E[+-]?\d+)/);
+      const wMatch = raw.match(/W=([+-]?[\d\.]+E[+-]?\d+)/);
+      const pfMatch = raw.match(/PF=([+-]?[\d\.]+E[+-]?\d+)/);
+      const varMatch = raw.match(/VAR=([+-]?[\d\.]+E[+-]?\d+)/);
+
+      if (vMatch) {
+        const val = parseFloat(vMatch[1]);
+        state[`ch${pid}`].v = val;
+        document.getElementById(`ch${pid}-v`).textContent = val.toFixed(2) + " V";
+      }
+      if (iMatch) {
+        const val = parseFloat(iMatch[1]);
+        state[`ch${pid}`].i = val;
+        document.getElementById(`ch${pid}-i`).textContent = val.toFixed(3) + " A";
+      }
+      if (wMatch) {
+        const val = parseFloat(wMatch[1]);
+        state[`ch${pid}`].p = val;
+        document.getElementById(`ch${pid}-w`).textContent = val.toFixed(2) + " W";
+        updateChart(pid === 1 ? chart1 : chart2, val);
+        updateEfficiency();
+        recordRow();
+      } else if (varMatch) {
+        const val = parseFloat(varMatch[1]);
+        document.getElementById(`ch${pid}-w`).textContent = val.toFixed(2) + " VAR";
+        updateChart(pid === 1 ? chart1 : chart2, val);
+      } else if (pfMatch) {
+        const val = parseFloat(pfMatch[1]);
+        document.getElementById(`ch${pid}-w`).textContent = val.toFixed(3) + " PF";
+      }
+    }
+
+    function updateEfficiency() {
+      const p1 = state.ch1.p;
+      const p2 = state.ch2.p;
+      const effEl = document.getElementById('kpi-eff');
+      const lossEl = document.getElementById('kpi-loss');
+      const benchEl = document.getElementById('kpi-bench-status');
+
+      if (p1 > 0 && p2 >= 0) {
+        const eff = (p2 / p1) * 100.0;
+        const loss = p1 - p2;
+        effEl.textContent = eff.toFixed(2) + " %";
+        lossEl.textContent = loss.toFixed(2) + " W";
+        benchEl.textContent = `CH1: ${p1.toFixed(2)} W ➔ CH2: ${p2.toFixed(2)} W | Loss: ${loss.toFixed(2)} W`;
+      } else {
+        effEl.textContent = "--- %";
+        lossEl.textContent = "--- W";
+        benchEl.textContent = "Waiting for synchronized dual-channel measurements...";
+      }
+    }
+
+    // CSV Logging & Export
+    function toggleCsvRecording() {
+      state.recording = !state.recording;
+      const btn = document.getElementById('btn-toggle-log');
+      const icon = document.getElementById('log-icon');
+      const label = document.getElementById('log-label');
+      const fStatus = document.getElementById('footer-log-status');
+
+      if (state.recording) {
+        state.records = [];
+        btn.className = "flex items-center space-x-1.5 bg-rose-600 hover:bg-rose-500 text-xs text-white font-semibold px-3.5 py-1.5 rounded shadow transition";
+        icon.textContent = "⏹";
+        label.textContent = "Stop CSV Recording";
+        fStatus.textContent = "Recording Live Stream...";
+      } else {
+        btn.className = "flex items-center space-x-1.5 bg-sky-600 hover:bg-sky-500 text-xs text-white font-semibold px-3.5 py-1.5 rounded shadow transition";
+        icon.textContent = "▶";
+        label.textContent = "Start CSV Recording";
+        fStatus.textContent = "Stopped (Downloading CSV)";
+        downloadCsvFile(state.records, "power_profiler_stream.csv");
+      }
+    }
+
+    function recordRow() {
+      if (!state.recording) return;
+      const p1 = state.ch1.p;
+      const p2 = state.ch2.p;
+      const eff = p1 > 0 ? ((p2 / p1) * 100.0).toFixed(2) : "";
+      const diff = p1 > 0 ? (p1 - p2).toFixed(2) : "";
+
+      const row = {
+        timestamp_iso: new Date().toISOString(),
+        ch1_v: state.ch1.v,
+        ch1_i: state.ch1.i,
+        ch1_p: state.ch1.p,
+        ch2_v: state.ch2.v,
+        ch2_i: state.ch2.i,
+        ch2_p: state.ch2.p,
+        eff_pct: eff,
+        delta_w: diff
+      };
+      state.records.push(row);
+      document.getElementById('footer-log-count').textContent = `${state.records.length} records`;
+    }
+
+    function exportSnapshotCsv() {
+      const p1 = state.ch1.p;
+      const p2 = state.ch2.p;
+      const eff = p1 > 0 ? ((p2 / p1) * 100.0).toFixed(2) : "";
+      const diff = p1 > 0 ? (p1 - p2).toFixed(2) : "";
+
+      const snapshot = [
+        ["metric", "value", "unit"],
+        ["timestamp", new Date().toISOString(), "ISO-8601"],
+        ["ch1_voltage", state.ch1.v, "V"],
+        ["ch1_current", state.ch1.i, "A"],
+        ["ch1_power", state.ch1.p, "W"],
+        ["ch2_voltage", state.ch2.v, "V"],
+        ["ch2_current", state.ch2.i, "A"],
+        ["ch2_power", state.ch2.p, "W"],
+        ["efficiency", eff, "%"],
+        ["power_loss", diff, "W"]
+      ];
+      
+      let csvContent = "data:text/csv;charset=utf-8," + snapshot.map(e => e.join(",")).join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `snapshot_${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    function downloadCsvFile(records, filename) {
+      if (!records || records.length === 0) return;
+      const header = Object.keys(records[0]).join(",");
+      const rows = records.map(r => Object.values(r).join(",")).join("\n");
+      const csv = "data:text/csv;charset=utf-8," + header + "\n" + rows;
+      const encodedUri = encodeURI(csv);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // Direct Browser Web Serial API (Runs 100% in Chrome / Edge without backend if desired)
+    async function connectDirectWebSerial() {
+      if (!("serial" in navigator)) {
+        alert("Web Serial API is available in Chrome, Edge, and Opera browsers.");
+        return;
+      }
+      try {
+        const port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 9600 });
+        alert("Web Serial Port connected directly in browser!");
+        
+        const textDecoder = new TextDecoderStream();
+        port.readable.pipeTo(textDecoder.writable);
+        const reader = textDecoder.readable.getReader();
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) {
+            processChannelData(1, value);
+          }
+        }
+      } catch (err) {
+        console.error("Web Serial Error:", err);
+      }
+    }
+
+    // Launch connection
+    window.addEventListener('DOMContentLoaded', () => {
+      initWebSocket();
+    });
+  </script>
+</body>
+</html>
