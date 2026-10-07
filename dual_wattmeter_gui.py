@@ -205,32 +205,32 @@ class ConnectionHandler:
 
 
 # ==============================================================================
-# UI COLOR PALETTE & TYPOGRAPHY SPECIFICATION (UI-SKILLS / BASELINE-UI)
+# UI COLOR PALETTE & TYPOGRAPHY SPECIFICATION (CLEAN LAB WHITE / BASELINE-UI)
 # ==============================================================================
 THEME = {
-    "bg": "#090d16",             # Deep slate canvas
-    "surface": "#111726",        # Primary surface card
-    "surface_subtle": "#161f33", # Elevated card / header
-    "border": "#1e293b",         # Slate 800 subtle borders
-    "border_focus": "#38bdf8",   # Sky focus accent
-    "text_primary": "#f8fafc",   # High-contrast readable text
-    "text_secondary": "#94a3b8", # Subtle secondary text
-    "text_muted": "#64748b",     # Muted captions / units
+    "bg": "#f8fafc",             # Clean slate-50 light canvas
+    "surface": "#ffffff",        # Pure crisp white cards
+    "surface_subtle": "#f1f5f9", # Subtle light gray elevated card (slate-100)
+    "border": "#e2e8f0",         # Slate-200 clean borders
+    "border_focus": "#0284c7",   # Sky-600 focus accent
+    "text_primary": "#0f172a",   # Slate-900 sharp readable text
+    "text_secondary": "#475569", # Slate-600 secondary labels
+    "text_muted": "#64748b",     # Slate-500 captions / units
     
-    # Semantic Badges & Readouts
-    "accent_cyan": "#38bdf8",    # Channel 1 primary voltage/accent
-    "accent_emerald": "#34d399", # Channel 1 & 2 current / efficiency
-    "accent_amber": "#fbbf24",   # Channel 2 power / warnings
-    "accent_violet": "#a78bfa",  # Secondary metrics
+    # Semantic Readouts & Instruments
+    "accent_cyan": "#0284c7",    # Channel 1 voltage (crisp blue)
+    "accent_emerald": "#16a34a", # Current & efficiency (vibrant green)
+    "accent_amber": "#d97706",   # Power & warnings (deep warm amber)
+    "accent_violet": "#7c3aed",  # Secondary metrics
     
     # Control States
-    "btn_bg": "#1e293b",
-    "btn_hover": "#334155",
+    "btn_bg": "#f1f5f9",
+    "btn_hover": "#e2e8f0",
     "btn_active": "#0284c7",
     "btn_primary_bg": "#0284c7",
     "btn_primary_fg": "#ffffff",
-    "badge_disconnected": "#334155",
-    "badge_connected": "#059669",
+    "badge_disconnected": "#94a3b8",
+    "badge_connected": "#16a34a",
 }
 
 FONT_DISPLAY = ("Segoe UI Variable Display", "Segoe UI", "Helvetica Neue", "Arial")
@@ -561,7 +561,7 @@ class DualPortGUI:
                  fg=THEME["text_muted"], bg=THEME["surface"]).pack(anchor="w", pady=(2, 2))
 
         log_txt = scrolledtext.ScrolledText(stream_box, height=3, font=(FONT_MONO[0], 8),
-                                            bg=THEME["bg"], fg=THEME["text_secondary"],
+                                            bg=THEME["surface_subtle"], fg=THEME["text_primary"],
                                             insertbackground=THEME["text_primary"],
                                             highlightthickness=1, highlightbackground=THEME["border"],
                                             bd=0)
