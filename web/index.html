@@ -139,7 +139,7 @@
 
         <!-- Serial target -->
         <div id="ch1-serial-box" class="flex items-center space-x-1.5 flex-1">
-          <select id="ch1-port" 
+          <select id="ch1-port" onchange="onPortSelectChange(1)"
                   class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1.5 flex-1 focus:outline-none focus:border-cyan-500">
             <option value="SIMULATOR-P1">SIMULATOR-P1 (Virtual Bench)</option>
           </select>
@@ -230,7 +230,7 @@
 
         <!-- Serial target -->
         <div id="ch2-serial-box" class="hidden flex items-center space-x-1.5 flex-1">
-          <select id="ch2-port" 
+          <select id="ch2-port" onchange="onPortSelectChange(2)"
                   class="bg-slate-900 border border-slate-700 text-xs text-slate-200 rounded px-2.5 py-1.5 flex-1 focus:outline-none focus:border-cyan-500">
             <option value="SIMULATOR-P2">SIMULATOR-P2 (Virtual Bench)</option>
           </select>
@@ -406,14 +406,45 @@
       const sel = document.getElementById(`ch${pid}-port`);
       const current = sel.value;
       sel.innerHTML = '';
+      
       ports.forEach(p => {
         const opt = document.createElement('option');
         opt.value = p;
-        opt.textContent = p;
+        opt.textContent = p.startsWith('SIMULATOR') ? `${p} (Virtual Bench)` : `Serial Port ${p}`;
         sel.appendChild(opt);
       });
-      if (ports.includes(current)) sel.value = current;
-      else if (ports.length > 0) sel.value = ports[pid === 1 ? ports.length - 2 : ports.length - 1] || ports[0];
+
+      // Add custom write-in option if needed
+      const customOpt = document.createElement('option');
+      customOpt.value = "CUSTOM";
+      customOpt.textContent = "+ Custom COM Port...";
+      sel.appendChild(customOpt);
+
+      if (ports.includes(current)) {
+        sel.value = current;
+      } else if (ports.some(p => p.startsWith('COM'))) {
+        // Pre-select first real COM port if present
+        sel.value = ports.find(p => p.startsWith('COM'));
+      } else if (ports.length > 0) {
+        sel.value = ports[pid === 1 ? 0 : Math.min(1, ports.length - 1)];
+      }
+    }
+
+    function onPortSelectChange(pid) {
+      const sel = document.getElementById(`ch${pid}-port`);
+      if (sel.value === 'CUSTOM') {
+        const custom = prompt(`Enter COM Port for Channel ${pid} (e.g. COM3, COM8, /dev/ttyUSB0):`, "COM8");
+        if (custom && custom.trim()) {
+          const val = custom.trim().toUpperCase();
+          const opt = document.createElement('option');
+          opt.value = val;
+          opt.textContent = `Serial Port ${val}`;
+          sel.insertBefore(opt, sel.firstChild);
+          sel.value = val;
+        } else {
+          sel.selectedIndex = 0;
+        }
+      }
     }
 
     function switchMode(pid) {

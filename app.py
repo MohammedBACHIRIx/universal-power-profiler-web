@@ -208,12 +208,44 @@ class InstrumentHub:
         self.loop = None
 
     def get_port_list(self):
+        detected = set()
+        # 1. pyserial list_ports
         try:
-            ports = [p.device for p in serial.tools.list_ports.comports()]
+            for p in serial.tools.list_ports.comports():
+                if p.device:
+                    detected.add(p.device)
         except Exception:
-            ports = []
+            pass
+
+        # 2. Windows Registry hardware serialcomm scan
+        if os.name == 'nt':
+            try:
+                import winreg
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'HARDWARE\DEVICEMAP\SERIALCOMM')
+                i = 0
+                while True:
+                    try:
+                        _, port_val, _ = winreg.EnumValue(key, i)
+                        if port_val:
+                            detected.add(str(port_val).strip())
+                        i += 1
+                    except WindowsError:
+                        break
+            except Exception:
+                pass
+
+        # Sort detected COM ports numerically (COM1, COM2, COM8...)
+        def sort_key(x):
+            num = re.findall(r'\d+', x)
+            return int(num[0]) if num else 999
+
+        ports = sorted(list(detected), key=sort_key)
+        
+        # Add always-available test simulators and common COM fallbacks so user is never stuck
         simulators = ["SIMULATOR-P1", "SIMULATOR-P2"]
-        return ports + simulators
+        common_ports = [f"COM{i}" for i in range(1, 13) if f"COM{i}" not in ports]
+        
+        return ports + simulators + common_ports
 
     async def broadcast(self, payload: dict):
         text = json.dumps(payload)
