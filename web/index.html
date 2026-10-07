@@ -359,10 +359,10 @@
       chart.update('none');
     }
 
-    // Connect WebSocket to Python Local Bridge
+    // Connect WebSocket to Backend (Local or Cloud Heroku)
     function initWebSocket() {
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${window.location.hostname}:8765`;
+      const wsUrl = `${proto}//${window.location.host}/ws`;
       
       const badge = document.getElementById('ws-badge');
       const badgeText = document.getElementById('ws-status');
